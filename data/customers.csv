@@ -1,0 +1,7 @@
+customer_id,customer_name,plan,price,usage
+101,Acme Corp,Pro,49,230
+102,Beta Inc,Basic,19,120
+103,Gamma Ltd,Enterprise,99,450
+104,Acme Corp,Pro,49,210
+105,,Pro,49,300
+106,Omega Ltd,Basic,19,-50
