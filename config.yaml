@@ -1,0 +1,16 @@
+api:
+  url: "https://httpbin.org/post"
+  timeout: 30
+  retries: 3
+  backoff_factor: 2
+
+pipeline:
+  input_file: "data/customers.csv"
+  rejected_file: "data/rejected_records.csv"
+  log_file: "migration.log"
+  batch_size: 10
+
+validation:
+  allow_negative_usage: false
+  allow_missing_names: false
+  allow_duplicates: false

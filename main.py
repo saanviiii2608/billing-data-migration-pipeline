@@ -1,32 +1,84 @@
+import argparse
+import sys
+
+from src.config import load_config
 from src.loader import load_data
-from src.validator import validate_data
+from src.validator import validate_data, filter_valid_records
 from src.transformer import transform_data
-from src.api_client import upload_record
+from src.api_client import upload_batch
 from src.logger import logger
 
 
-logger.info("Starting billing data migration pipeline")
+def main():
+    parser = argparse.ArgumentParser(description="Billing Data Migration Pipeline")
+    parser.add_argument(
+        "--input", "-i",
+        help="Path to input CSV file (overrides config.yaml)",
+    )
+    parser.add_argument(
+        "--config", "-c",
+        default="config.yaml",
+        help="Path to config file (default: config.yaml)",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Validate and transform only, skip upload",
+    )
+    args = parser.parse_args()
 
-df = load_data("data/customers.csv")
+    logger.info("Starting billing data migration pipeline")
 
-errors = validate_data(df)
+    config = load_config(args.config)
+    input_file = args.input or config["pipeline"]["input_file"]
 
-logger.info("Validation completed")
+    # Load
+    df = load_data(input_file)
 
-records = transform_data(df)
+    # Validate
+    errors, invalid_indices = validate_data(df)
+    if errors:
+        logger.info(f"Validation found {len(errors)} issue(s):")
+        for error in errors:
+            logger.info(f"  - {error}")
 
-success = 0
+    # Filter out invalid records
+    valid_df, rejected_df = filter_valid_records(df, invalid_indices)
 
-for record in records:
+    # Save rejected records
+    if not rejected_df.empty:
+        rejected_path = config["pipeline"]["rejected_file"]
+        rejected_df.to_csv(rejected_path, index=False)
+        logger.info(f"Rejected records saved to {rejected_path}")
 
-    if upload_record(record):
-        success += 1
-        logger.info(f"Uploaded customer {record['customer_id']}")
+    if valid_df.empty:
+        logger.warning("No valid records to process. Exiting.")
+        sys.exit(1)
+
+    # Transform
+    records = transform_data(valid_df)
+
+    # Upload
+    if args.dry_run:
+        logger.info("Dry run mode — skipping upload")
+    else:
+        api_config = config["api"]
+        results = upload_batch(
+            records,
+            api_url=api_config["url"],
+            timeout=api_config["timeout"],
+            retries=api_config["retries"],
+            backoff_factor=api_config["backoff_factor"],
+        )
+        logger.info("Upload Summary:")
+        logger.info(f"  Total valid records: {len(records)}")
+        logger.info(f"  Uploaded successfully: {len(results['success'])}")
+        logger.info(f"  Failed: {len(results['failed'])}")
+        if results["failed"]:
+            logger.warning(f"  Failed customer IDs: {results['failed']}")
+
+    logger.info("Pipeline finished")
 
 
-print("\nUpload Summary")
-
-print("Total records:", len(records))
-print("Uploaded successfully:", success)
-
-logger.info("Pipeline finished successfully")
+if __name__ == "__main__":
+    main()
